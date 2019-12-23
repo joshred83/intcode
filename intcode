@@ -1,0 +1,110 @@
+from collections import deque
+
+
+def DEBUG(*s):
+    if True:
+        print(' '.join(map(str, s)))
+
+
+class IntCode(object):
+    def __init__(self, intcode, noun=None, verb=None):
+        self._program = [int(x) for x in intcode]
+        self._pointer = 0
+        self._opcode = self[self._pointer]
+
+        if noun is not None:
+            self[1] = noun
+        if verb is not None:
+            self[2] = verb
+
+        self._operations = {1: 'ADD',
+                            2: 'MUL',
+                            3: 'INPUT',
+                            4: 'OUTPUT',
+                            99: 'HALT'}
+
+        self._mode = {0: 'POSITION',
+                      1: 'IMMEDIATE'}
+        self._input = deque()
+        self._output = deque()
+
+    def __getitem__(self, item):
+        return self._program[item]
+
+    def __setitem__(self, key, value):
+        self._program[key] = value
+
+    def run(self, inp=None):
+
+        if inp is not None:
+            self._input.append(inp)
+        results = None
+
+        while results is None:
+            results = self.one_instruction()
+        return results
+
+    def one_instruction(self):
+
+        DEBUG(
+            f'OPCODE {self._operations[self._opcode]}')
+
+        if self._operations[self._opcode] == 'ADD':
+            a = self.read_next()
+            b = self.read_next()
+            self.write_next(a + b)
+
+        elif self._operations[self._opcode] == 'MUL':
+            a = self.read_next()
+            b = self.read_next()
+            self.write_next(a * b)
+
+        elif self._operations[self._opcode] == 'INPUT':
+            a = self._input.popleft()
+            self.write_next(a)
+
+        elif self._operations[self._opcode] == 'output':
+            a = self._input.popleft()
+            self.write_next(a)
+
+        elif self._operations[self._opcode] == 'HALT':
+            self._output.append(self[0])
+            return self._output.popleft()
+        else:
+            raise ValueError
+
+        self._opcode = self.read_next(mode=1)
+
+    def write_next(self, val, mode=0):
+        self._pointer += 1
+
+        if self._mode[mode] == 'POSITION':
+            index = self[self._pointer]
+            self[index] = val
+        elif self._mode[mode] == 'IMMEDIATE':
+            index = self._pointer
+            val = self[index]
+        DEBUG(f'WRITE {val} TO {index}')
+
+    def read_next(self, mode=0):
+        self._pointer += 1
+        if self._mode[mode] == 'POSITION':
+            index = self[self._pointer]
+            val = self[index]
+        elif self._mode[mode] == 'IMMEDIATE':
+            index = self._pointer
+            val = self[index]
+
+        DEBUG(f'READ {val} FROM {index}')
+
+        return val
+
+
+with open('d2.intcode') as f:
+    data = f.read().strip().split(',')
+
+
+my_computer = IntCode(data, noun=12, verb=2)
+
+output = my_computer.run()
+print(output)

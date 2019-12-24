@@ -1,14 +1,16 @@
 from collections import deque
+import pprint
 
 
-def DEBUG(*s):
+def DEBUG(*s, indent=0):
+    indent = ' ' * indent
     if True:
-        print(' '.join(map(str, s)))
+        print(indent + ' '.join(map(str, s)))
 
 
 class IntCode(object):
-    def __init__(self, intcode, noun=None, verb=None):
-        self._program = [int(x) for x in intcode]
+    def __init__(self, intcode, noun=None, verb=None, inp=None):
+        self._program = [x for x in intcode]
         self._pointer = 0
         self._opcode = self[self._pointer]
 
@@ -16,17 +18,24 @@ class IntCode(object):
             self[1] = noun
         if verb is not None:
             self[2] = verb
+        if inp is not None:
+            self._input = deque([inp])
+        else:
+            self._input = deque()
 
         self._operations = {1: 'ADD',
                             2: 'MUL',
                             3: 'INPUT',
                             4: 'OUTPUT',
+                            5: 'JUMP-TRUE',
+                            6: 'JUMP-FALSE',
+                            7: 'LESS',
+                            8: 'EQUALS',
                             99: 'HALT'}
 
         self._mode = {0: 'POSITION',
                       1: 'IMMEDIATE'}
-        self._input = deque()
-        self._output = deque()
+        self._output = None
 
     def __getitem__(self, item):
         return self._program[item]
@@ -46,65 +55,163 @@ class IntCode(object):
 
     def one_instruction(self):
 
+        opcode = int(self._opcode[-2:])
+        print(self._program[:])
+
         DEBUG(
-            f'OPCODE {self._operations[self._opcode]}')
+            f'INSTRUCTION: {self._opcode} {self._operations[opcode]} {[self._mode[int(x)] for x in self._opcode[:-2]]}')
+        DEBUG(f'STATE: LOC {self._pointer}, REG {[x for x in self._input]} {[self._output]}', indent=4)
 
-        if self._operations[self._opcode] == 'ADD':
-            a = self.read_next()
-            b = self.read_next()
-            self.write_next(a + b)
+        if self._operations[opcode] == 'ADD':
+            parameters = self.split_opcode_parameters(n_params=3)
+            a = int(self.read_next(mode=parameters[0]))
+            b = int(self.read_next(mode=parameters[1]))
+            DEBUG(f'{self._operations[opcode]} {a} + {b} = {a + b} ', indent=4)
+            self.write_next(val=a + b, mode=parameters[2])
+            self._opcode = self.read_next(mode=1)
 
-        elif self._operations[self._opcode] == 'MUL':
-            a = self.read_next()
-            b = self.read_next()
-            self.write_next(a * b)
+            DEBUG(f'COMPLETE. LOC {self._pointer} \n')
+        elif self._operations[opcode] == 'MUL':
+            parameters = self.split_opcode_parameters(n_params=3)
+            a = int(self.read_next(mode=parameters[0]))
+            b = int(self.read_next(mode=parameters[1]))
+            self.write_next(val=a * b, mode=parameters[2])
+            DEBUG(f'{self._operations[opcode]} {a} * {b} = {a * b} ', indent=4)
+            self._opcode = self.read_next(mode=1)
+            DEBUG(f'COMPLETE. LOC {self._pointer} \n')
 
-        elif self._operations[self._opcode] == 'INPUT':
-            a = self._input.popleft()
-            self.write_next(a)
+        elif self._operations[opcode] == 'INPUT':
+            parameters = self.split_opcode_parameters(n_params=1)
+            if self._input:
+                a = self._input.popleft()
+                DEBUG(f'{self._operations[opcode]} {a} ', indent=4)
+                self.write_next(val=a, mode=parameters[0])
+                self._opcode = self.read_next(mode=1)
+                DEBUG(f'COMPLETE. LOC {self._pointer} \n')
+            else:
+                DEBUG(f'{self._operations[opcode]} AWAIT INPUT')
+                return 'WAIT'
 
-        elif self._operations[self._opcode] == 'output':
-            a = self._input.popleft()
-            self.write_next(a)
+        elif self._operations[opcode] == 'OUTPUT':
+            parameters = self.split_opcode_parameters(n_params=1)
+            self._output = (self.read_next(mode=parameters[0]))
+            self._opcode = self.read_next(mode=1)
+            DEBUG(f'COMPLETE. LOC {self._pointer} \n')
 
-        elif self._operations[self._opcode] == 'HALT':
-            self._output.append(self[0])
-            return self._output.popleft()
+        elif self._operations[opcode] == 'JUMP-TRUE':
+            DEBUG(f'LOC {self._pointer}, OP {self._opcode} PARAMS {self[self._pointer:self._pointer + 3]}')
+            parameters = self.split_opcode_parameters(n_params=2)
+            jump_val = int(self.read_next(parameters[0]))
+
+            DEBUG(f'EVAL {jump_val} {"JUMP" if jump_val > 0 else "NO JUMP"}', indent=4)
+
+
+            if jump_val > 0:
+                DEBUG("IS JUMPING", indent=4)
+                self._pointer = int(self.read_next(parameters[1]))
+                self._opcode = self._program[self._pointer]
+                DEBUG(f'COMPLETE. LOC {self._pointer} \n')
+            else:
+
+                DEBUG("NOT JUMPING", indent=4)
+                self.read_next(mode=1)
+                self._opcode = self.read_next(mode=1)
+                DEBUG(f'COMPLETE. LOC {self._pointer} \n')
+
+        elif self._operations[opcode] == 'JUMP-FALSE':
+            DEBUG(f'LOC {self._pointer}, OP {self._opcode} PARAMS {self[self._pointer:self._pointer + 3]}', indent=4)
+
+            parameters = self.split_opcode_parameters(n_params=2)
+            jump_val = int(self.read_next(parameters[0]))
+            DEBUG(f'EVAL {jump_val} {"JUMP" if jump_val == 0 else "NO JUMP"}', indent=4)
+
+            if jump_val == 0:
+                DEBUG("IS JUMPING", indent=4)
+                self._pointer = int(self.read_next(parameters[1]))
+                self._opcode = self._program[self._pointer]
+                DEBUG(f'COMPLETE. LOC {self._pointer} \n')
+            else:
+
+                DEBUG("NOT JUMPING", indent=4)
+                self.read_next(mode=1)
+                self._opcode = self.read_next(mode=1)
+                DEBUG(f'COMPLETE. LOC {self._pointer} \n')
+
+
+        elif self._operations[opcode] == 'LESS':
+            parameters = self.split_opcode_parameters(n_params=3)
+            a = int(self.read_next(mode=parameters[0]))
+            b = int(self.read_next(mode=parameters[1]))
+            DEBUG(f'{self._operations[opcode]} {a} < {b} = {a < b} ', indent=4)
+            self.write_next(int(a < b), mode=parameters[2])
+            DEBUG(f'COMPLETE  {self._operations[opcode]} \n')
+            self._opcode = self.read_next(mode=1)
+
+        elif self._operations[opcode] == 'EQUALS':
+            parameters = self.split_opcode_parameters(n_params=3)
+            a = int(self.read_next(mode=parameters[0]))
+            b = int(self.read_next(mode=parameters[1]))
+            DEBUG(f'{self._operations[opcode]} {a} == {b} = {a == b} ', indent=4)
+            self.write_next(int(a == b), mode=parameters[2])
+            DEBUG(f'COMPLETE  {self._operations[opcode]} \n')
+            self._opcode = self.read_next(mode=1)
+        elif self._operations[opcode] == 'HALT':
+            if self._output is None:
+                return 'err'
+            else:
+                return self._output
+
         else:
             raise ValueError
 
-        self._opcode = self.read_next(mode=1)
+    def split_opcode_parameters(self, n_params):
+        return [int(param) for param in reversed(self._opcode[:-2].rjust(n_params, '0'))]
 
     def write_next(self, val, mode=0):
         self._pointer += 1
-
         if self._mode[mode] == 'POSITION':
-            index = self[self._pointer]
-            self[index] = val
+            index = int(self[self._pointer])
+            self[index] = str(val)
         elif self._mode[mode] == 'IMMEDIATE':
             index = self._pointer
-            val = self[index]
-        DEBUG(f'WRITE {val} TO {index}')
+            self[index] = str(val)
+        DEBUG(f'{self._mode[mode]} WRITE {val} TO LOC {index}', indent=4)
 
-    def read_next(self, mode=0):
+    def read_next(self, mode: int = 0) -> int:
         self._pointer += 1
         if self._mode[mode] == 'POSITION':
-            index = self[self._pointer]
+            index = int(self[self._pointer])
             val = self[index]
         elif self._mode[mode] == 'IMMEDIATE':
-            index = self._pointer
+            index = int(self._pointer)
+
             val = self[index]
 
-        DEBUG(f'READ {val} FROM {index}')
+        DEBUG(f'{self._mode[mode]} READ {val} FROM LOC {index}', indent=4)
 
         return val
 
 
-with open('d2.intcode') as f:
+clean = lambda x: x.strip().split(',')
+with open('d5.intcode') as f:
     data = f.read().strip().split(',')
 
+# data = [clean("3,9,8,9,10,9,4,9,99,-1,8"),
+#         clean("3,9,7,9,10,9,4,9,99,-1,8"),
+#         clean("3,3,1108,-1,8,3,4,3,99"),
+#         clean("3,3,1107,-1,8,3,4,3,99"),
+#         clean("3,12,6,12,15,1,13,14,13,4,13,99,-1,0,1,9")]
+# data =
+#
+# data = clean("3,3,1105,-1,9,1101,0,0,12,4,12,99,1")
+#
+# out = []
+# for x in range(0, 15):
+#     my_computer = IntCode(data)
+#     o = my_computer.run(inp=x)
+#     out.append((x,o))
 
-my_computer = IntCode(data, noun=12, verb=2)
-
-output = my_computer.run()
-print(output)
+# print(out)
+#data = clean('''3,21,1008,21,8,20,1005,20,22,107,8,21,20,1006,20,31,1106,0,36,98,0,0,1002,21,125,20,4,20,1105,1,46,104,999,1105,1,46,1101,1000,1,20,4,20,1105,1,46,98,99''')
+pc = IntCode(data)
+print(pc.run(5))
